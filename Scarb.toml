@@ -1,0 +1,13 @@
+[package]
+name = "swaptrade_contract"
+version = "0.1.0"
+cairo-version = "2.11.4"
+
+[dependencies]
+starknet = "2.11.4"
+
+[lib]
+path = "src/lib.cairo"
+
+[tool.starknet-contract]
+casm = true
