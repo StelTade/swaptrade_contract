@@ -9,6 +9,6 @@ pub struct Token {
 
 #[derive(Copy, Drop, Serde, starknet::Store)]
 pub struct UserBalance {
-    pub token: felt252,  // Token address as felt252
-    pub amount: u256,    // Amount with support for large numbers
+    pub token: felt252, // Token address as felt252
+    pub amount: u256 // Amount with support for large numbers
 }
