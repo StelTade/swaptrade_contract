@@ -1,4 +1,4 @@
-pub mod types;
+
 
 #[starknet::contract]
 pub mod SwapTrade {
@@ -202,3 +202,4 @@ mod tests {
         SwapTrade::deposit(ref state, token_address, deposit_amount);
     }
 }
+

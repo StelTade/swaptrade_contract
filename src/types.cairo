@@ -1,4 +1,3 @@
-// Types for the SwapTrade protocol
 
 #[derive(Copy, Drop, Serde, starknet::Store)]
 pub struct Token {
@@ -12,3 +11,4 @@ pub struct UserBalance {
     pub token: felt252, // Token address as felt252
     pub amount: u256 // Amount with support for large numbers
 }
+
