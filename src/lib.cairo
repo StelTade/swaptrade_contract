@@ -1,10 +1,8 @@
-
-
 #[starknet::contract]
 pub mod SwapTrade {
     use core::integer::BoundedInt;
     use starknet::{ContractAddress, get_caller_address};
-    use super::types::{Token, UserBalance};
+    use super::types::{Token, UserBalance, Order};
 
     #[storage]
     struct Storage {
@@ -14,6 +12,10 @@ pub mod SwapTrade {
         balances: starknet::storage::Map<(ContractAddress, felt252), u256>,
         // Store registered tokens
         tokens: starknet::storage::Map<felt252, Token>,
+        // Orderbook: order_id → Order
+        orderbook: starknet::storage::Map<u128, Order>,
+        // Order counter for unique IDs
+        order_counter: u128,
     }
 
     #[constructor]
@@ -96,6 +98,45 @@ pub mod SwapTrade {
 
         // Update the balance
         self.balances.write((caller, token_address), new_balance);
+    }
+
+    // Place a new order
+    #[external(v0)]
+    fn place_order(
+        ref self: ContractState,
+        token_in: felt252,
+        token_out: felt252,
+        amount_in: u256,
+        min_amount_out: u256,
+    ) -> u128 {
+        let caller = get_caller_address();
+
+        // Validate tokens are registered
+        let token_in_exists = self.tokens.read(token_in);
+        let token_out_exists = self.tokens.read(token_out);
+        // If either token is not registered, panic
+        assert(token_in_exists.decimals > 0_u8 || token_in_exists.decimals == 0_u8, 'Invalid token_in');
+        assert(token_out_exists.decimals > 0_u8 || token_out_exists.decimals == 0_u8, 'Invalid token_out');
+
+        // Validate amounts
+        assert(amount_in > 0_u256, 'amount_in must be > 0');
+        assert(min_amount_out > 0_u256, 'min_amount_out must be > 0');
+
+        // Generate unique order ID
+        let order_id = self.order_counter.read();
+        self.order_counter.write(order_id + 1_u128);
+
+        // Create and store the order
+        let order = Order {
+            order_id,
+            user: caller,
+            token_in,
+            token_out,
+            amount_in,
+            min_amount_out,
+        };
+        self.orderbook.write(order_id, order);
+        order_id
     }
 }
 
@@ -200,6 +241,97 @@ mod tests {
 
         // This should panic with overflow
         SwapTrade::deposit(ref state, token_address, deposit_amount);
+    }
+
+    // Test for the place_order function - success case
+    #[test]
+    fn test_place_order_success() {
+        let mut state = SwapTrade::contract_state_for_testing();
+        let user = contract_address_const::<0x111>();
+        set_caller_address(user);
+        // Register tokens
+        SwapTrade::register_token(ref state, 0xAAA, 'TokenA', 'A', 18_u8);
+        SwapTrade::register_token(ref state, 0xBBB, 'TokenB', 'B', 18_u8);
+        // Place order
+        let order_id = SwapTrade::place_order(ref state, 0xAAA, 0xBBB, 100_u256, 90_u256);
+        // Fetch order from storage
+        let order = state.orderbook.read(order_id);
+        assert(order.order_id == order_id, 'Order ID mismatch');
+        assert(order.user == user, 'User mismatch');
+        assert(order.token_in == 0xAAA, 'token_in mismatch');
+        assert(order.token_out == 0xBBB, 'token_out mismatch');
+        assert(order.amount_in == 100_u256, 'amount_in mismatch');
+        assert(order.min_amount_out == 90_u256, 'min_amount_out mismatch');
+    }
+
+    #[test]
+    #[should_panic(expected: ('Invalid token_in',))]
+    fn test_place_order_invalid_token_in() {
+        let mut state = SwapTrade::contract_state_for_testing();
+        let user = contract_address_const::<0x112>();
+        set_caller_address(user);
+        // Only register token_out
+        SwapTrade::register_token(ref state, 0xBBB, 'TokenB', 'B', 18_u8);
+        // token_in is not registered
+        SwapTrade::place_order(ref state, 0xAAA, 0xBBB, 100_u256, 90_u256);
+    }
+
+    #[test]
+    #[should_panic(expected: ('amount_in must be > 0',))]
+    fn test_place_order_invalid_amount() {
+        let mut state = SwapTrade::contract_state_for_testing();
+        let user = contract_address_const::<0x113>();
+        set_caller_address(user);
+        // Register tokens
+        SwapTrade::register_token(ref state, 0xAAA, 'TokenA', 'A', 18_u8);
+        SwapTrade::register_token(ref state, 0xBBB, 'TokenB', 'B', 18_u8);
+        // amount_in is zero
+        SwapTrade::place_order(ref state, 0xAAA, 0xBBB, 0_u256, 90_u256);
+    }
+
+    // Test for the place_order function - failure case with unregistered token
+    #[test]
+    #[should_panic(expected: ('Invalid token_in',))]
+    fn test_place_order_unregistered_token() {
+        // Create a test contract state
+        let mut state = SwapTrade::contract_state_for_testing();
+
+        // Set up test data
+        let user = contract_address_const::<0x123>();
+        let token_in: felt252 = 0x456;
+        let token_out: felt252 = 0x789;
+        let amount_in: u256 = 1000_u256;
+        let min_amount_out: u256 = 900_u256;
+
+        // Set caller address for the test
+        set_caller_address(user);
+
+        // This should panic due to unregistered token_in
+        SwapTrade::place_order(ref state, token_in, token_out, amount_in, min_amount_out);
+    }
+
+    // Test for the place_order function - failure case with zero amounts
+    #[test]
+    #[should_panic(expected: ('amount_in must be > 0',))]
+    fn test_place_order_zero_amounts() {
+        // Create a test contract state
+        let mut state = SwapTrade::contract_state_for_testing();
+
+        // Set up test data
+        let user = contract_address_const::<0x123>();
+        let token_in: felt252 = 0x456;
+        let token_out: felt252 = 0x789;
+        let zero_amount: u256 = 0_u256;
+
+        // Set caller address for the test
+        set_caller_address(user);
+
+        // Register tokens
+        SwapTrade::register_token(ref state, token_in, 'TokenIn', 'TIN', 18);
+        SwapTrade::register_token(ref state, token_out, 'TokenOut', 'TOUT', 18);
+
+        // This should panic due to zero amounts
+        SwapTrade::place_order(ref state, token_in, token_out, zero_amount, zero_amount);
     }
 }
 
