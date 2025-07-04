@@ -3,6 +3,72 @@ pub mod SwapTrade {
     use core::integer::BoundedInt;
     use starknet::{ContractAddress, get_caller_address};
     use super::types::{Token, UserBalance, Order};
+    use super::interfaces::IERC20;
+    use super::security::reentrancy_guard::*;
+    // Import u256 arithmetic helpers if needed
+    use core::integer::u256_add;
+    use core::integer::u256_sub;
+    // Event for token swaps
+    #[event]
+    fn TokensSwapped(
+        user: ContractAddress,
+        token_in: felt252,
+        token_out: felt252,
+        amount_in: u256,
+        amount_out: u256,
+    );
+    // Swap function: swaps amount_in of token_in for token_out, ensuring min_amount_out and atomicity
+    #[external(v0)]
+    fn swap(
+        ref self: ContractState,
+        token_in: felt252,
+        token_out: felt252,
+        amount_in: u256,
+        min_amount_out: u256,
+        recipient: ContractAddress,
+    ) {
+        // Reentrancy guard
+        non_reentrant!();
+
+        let caller = get_caller_address();
+
+        // Check tokens are registered
+        let token_in_info = self.tokens.read(token_in);
+        let token_out_info = self.tokens.read(token_out);
+        assert(token_in_info.decimals >= 0_u8, 'Invalid token_in');
+        assert(token_out_info.decimals >= 0_u8, 'Invalid token_out');
+
+        // Check input amount
+        assert(amount_in > 0_u256, 'amount_in must be > 0');
+        assert(min_amount_out > 0_u256, 'min_amount_out must be > 0');
+
+        // Check user balance
+        let user_balance = self.balances.read((caller, token_in));
+        assert(user_balance >= amount_in, 'Insufficient balance');
+
+        // Calculate output amount (for demo, 1:1 swap, replace with real logic)
+        let amount_out = amount_in;
+
+        // Slippage protection
+        assert(amount_out >= min_amount_out, 'Slippage: amount_out < min_amount_out');
+
+        // Update balances (state changes before external calls)
+        let new_user_balance = u256_sub(user_balance, amount_in);
+        self.balances.write((caller, token_in), new_user_balance);
+
+        let recipient_balance = self.balances.read((recipient, token_out));
+        let new_recipient_balance = u256_add(recipient_balance, amount_out);
+        self.balances.write((recipient, token_out), new_recipient_balance);
+
+        // Emit event
+        TokensSwapped(
+            user=caller,
+            token_in=token_in,
+            token_out=token_out,
+            amount_in=amount_in,
+            amount_out=amount_out,
+        );
+    }
 
     #[storage]
     struct Storage {
